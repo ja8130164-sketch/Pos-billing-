@@ -1,0 +1,19 @@
+{
+  "id": "com.myshop.posapp",
+  "name": "Smart POS & Inventory",
+  "short_name": "Smart POS",
+  "description": "POS Billing and Inventory Management App",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2563eb",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "https://flaticon.com",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
