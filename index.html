@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart POS & Inventory</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#2563eb">
+    <link rel="apple-touch-icon" href="https://flaticon.com">
+    <style>
+        :root { --primary: #2563eb; --success: #16a34a; --danger: #dc2626; --bg: #f1f5f9; }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: sans-serif; }
+        body { background: var(--bg); color: #1e293b; padding-bottom: 50px; }
+        header { background: var(--primary); color: white; padding: 15px; display: flex; justify-content: space-between; align-items: center; }
+        .nav-btns button { background: rgba(255,255,255,0.2); border: none; color: white; padding: 8px 12px; border-radius: 5px; font-weight: bold; }
+        .nav-btns button.active { background: white; color: var(--primary); }
+        .container { max-width: 1000px; margin: 15px auto; padding: 0 12px; }
+        .section { display: none; }
+        .section.active { display: block; }
+        .card { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.05); margin-bottom: 15px; }
+        .product-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; margin-top: 10px; }
+        .product-item { border: 1px solid #cbd5e1; padding: 10px; border-radius: 6px; text-align: center; cursor: pointer; }
+        .product-item.out { opacity: 0.4; background: #fee2e2; pointer-events: none; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { padding: 8px; border-bottom: 1px solid #e2e8f0; text-align: left; font-size: 0.9rem; }
+        input { width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #cbd5e1; border-radius: 5px; }
+        .btn { width: 100%; padding: 12px; border: none; border-radius: 6px; color: white; font-weight: bold; cursor: pointer; margin-top: 8px; }
+        .btn-success { background: var(--success); }
+        .btn-primary { background: var(--primary); }
+        .btn-danger { background: var(--danger); }
+        #receipt-area { display: none; }
+        @media print {
+            body * { visibility: hidden; }
+            #receipt-area, #receipt-area * { visibility: visible; }
+            #receipt-area { display: block; position: absolute; left: 0; top: 0; width: 80mm; }
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h3>🛒 Smart POS</h3>
+    <div class="nav-btns">
+        <button id="btn-pos" class="active" onclick="switchTab('pos')">Billing</button>
+        <button id="btn-inv" onclick="switchTab('inv')">Inventory</button>
+    </div>
+</header>
+
+<div class="container">
+    <div id="pos-section" class="section active">
+        <div class="card">
+            <input type="text" id="search-box" placeholder="Search item..." onkeyup="renderPOS()">
+            <div id="pos-products" class="product-grid"></div>
+        </div>
+        <div class="card">
+            <h4>Current Bill</h4>
+            <table>
+                <thead><tr><th>Item</th><th>Qty</th><th>Total</th><th></th></tr></thead>
+                <tbody id="cart-items"></tbody>
+            </table>
+            <h3 style="margin-top:15px; text-align:right;">Total: Rs. <span id="grand-total">0</span></h3>
+            <button class="btn btn-success" onclick="checkout()">Complete & Print Bill</button>
+            <button class="btn btn-danger" onclick="clearCart()">Clear</button>
+        </div>
+    </div>
+
+    <div id="inv-section" class="section">
+        <div class="card">
+            <h4>Add Product</h4><br>
+            <input type="text" id="item-name" placeholder="Item Name">
+            <input type="number" id="item-price" placeholder="Price (Rs.)">
+            <input type="number" id="item-stock" placeholder="Stock Quantity">
+            <button class="btn btn-primary" onclick="addProduct()">+ Save Product</button>
+        </div>
+        <div class="card">
+            <h4>Stock List</h4>
+            <table>
+                <thead><tr><th>Name</th><th>Price</th><th>Stock</th><th>Action</th></tr></thead>
+                <tbody id="inv-table"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div id="receipt-area">
+    <h3 style="text-align:center;">SHOP RECEIPT</h3>
+    <p id="rec-date" style="font-size:11px; text-align:center;"></p><hr>
+    <table id="rec-items" style="width:100%; font-size:12px;"></table><hr>
+    <h4 style="text-align:right;">Total: Rs. <span id="rec-total"></span></h4>
+</div>
+
+<script>
+    if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js'); }
+
+    let products = JSON.parse(localStorage.getItem('pos_products')) || [
+        { id: 1, name: 'Tea Pack', price: 250, stock: 20 },
+        { id: 2, name: 'Sugar 1kg', price: 150, stock: 50 }
+    ];
+    let cart = [];
+
+    function saveData() { localStorage.setItem('pos_products', JSON.stringify(products)); }
+
+    function switchTab(tab) {
+        document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+        document.querySelectorAll('.nav-btns button').forEach(b => b.classList.remove('active'));
+        document.getElementById(tab + '-section').classList.add('active');
+        document.getElementById('btn-' + tab).classList.add('active');
+        tab === 'pos' ? renderPOS() : renderInv();
+    }
+
+    function renderPOS() {
+        const q = document.getElementById('search-box').value.toLowerCase();
+        const box = document.getElementById('pos-products');
+        box.innerHTML = '';
+        products.filter(p => p.name.toLowerCase().includes(q)).forEach(p => {
+            box.innerHTML += `<div class="product-item ${p.stock <= 0 ? 'out' : ''}" onclick="addToCart(${p.id})">
+                <b>${p.name}</b><br><span style="color:#2563eb">Rs.${p.price}</span><br><small>Stock: ${p.stock}</small>
+            </div>`;
+        });
+    }
+
+    function addToCart(id) {
+        const p = products.find(x => x.id === id);
+        const c = cart.find(x => x.id === id);
+        if (c) { if (c.qty < p.stock) c.qty++; else alert('Out of stock!'); }
+        else { cart.push({ id: p.id, name: p.name, price: p.price, qty: 1 }); }
+        renderCart();
+    }
+
+    function renderCart() {
+        const tbody = document.getElementById('cart-items');
+        tbody.innerHTML = '';
+        let total = 0;
+        cart.forEach((c, idx) => {
+            total += c.price * c.qty;
+            tbody.innerHTML += `<tr>
+                <td>${c.name}</td>
+                <td><button onclick="changeQty(${idx},-1)">-</button> ${c.qty} <button onclick="changeQty(${idx},1)">+</button></td>
+                <td>${c.price * c.qty}</td>
+                <td><button onclick="cart.splice(${idx},1);renderCart()" style="color:red;border:none;background:none;">X</button></td>
+            </tr>`;
+        });
+        document.getElementById('grand-total').innerText = total;
+    }
+
+    function changeQty(idx, delta) {
+        const p = products.find(x => x.id === cart[idx].id);
+        if (cart[idx].qty + delta <= 0) cart.splice(idx, 1);
+        else if (cart[idx].qty + delta <= p.stock) cart[idx].qty += delta;
+        renderCart();
+    }
+
+    function clearCart() { cart = []; renderCart(); }
+
+    function checkout() {
+        if (!cart.length) return alert('Cart empty!');
+        cart.forEach(c => { products.find(p => p.id === c.id).stock -= c.qty; });
+        saveData();
+        document.getElementById('rec-date').innerText = new Date().toLocaleString();
+        let html = '<tr><th align="left">Item</th><th>Qty</th><th align="right">Amt</th></tr>', total = 0;
+        cart.forEach(c => { total += c.price * c.qty; html += `<tr><td>${c.name}</td><td align="center">${c.qty}</td><td align="right">${c.price * c.qty}</td></tr>`; });
+        document.getElementById('rec-items').innerHTML = html;
+        document.getElementById('rec-total').innerText = total;
+        window.print();
+        clearCart(); renderPOS();
+    }
+
+    function addProduct() {
+        const name = document.getElementById('item-name').value.trim();
+        const price = parseFloat(document.getElementById('item-price').value);
+        const stock = parseInt(document.getElementById('item-stock').value);
+        if (!name || isNaN(price) || isNaN(stock)) return alert('Fill all fields!');
+        products.push({ id: Date.now(), name, price, stock });
+        saveData();
+        document.getElementById('item-name').value = ''; document.getElementById('item-price').value = ''; document.getElementById('item-stock').value = '';
+        renderInv();
+    }
+
+    function renderInv() {
+        const tbody = document.getElementById('inv-table');
+        tbody.innerHTML = '';
+        products.forEach((p, idx) => {
+            tbody.innerHTML += `<tr><td>${p.name}</td><td>${p.price}</td><td>${p.stock}</td>
+            <td><button onclick="products.splice(${idx},1);saveData();renderInv()" style="background:red;color:white;border:none;padding:4px 8px;border-radius:4px;">Del</button></td></tr>`;
+        });
+    }
+    renderPOS();
+</script>
+</body>
+          </html>
+  
